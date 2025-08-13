@@ -1,0 +1,654 @@
+#====Import Packages====
+
+import numpy as np
+import os
+from sympy import symbols, Eq,solve,I
+import matplotlib.pyplot as plt
+import math
+import scipy.integrate as integrate
+import scipy.special as special
+from numpy import sqrt,sin,cos,pi
+import scipy.optimize as opt
+from scipy.optimize import curve_fit
+
+get_ipython().run_line_magic('config', "InlineBackend.figure_formats = ['svg']")
+
+#====Define Functions====
+
+#Define the Potential Energy used (Intrinsic Case below)
+def T(x,*parameters):
+    T0, u = parameters
+    Energy = T0*(np.emath.log(x)-u*x)
+    return Energy.real
+
+#Define the Dynamic Mass (Intrinsic Case)
+def M(x,*parameters):
+    m0,xi = parameters
+    Mass = m0*np.emath.log(x)
+    return Mass
+
+#Define integrand of the Tunnelling Exponent
+def P(x,*parameters):
+    P0,m0,u = parameters
+    Tunneling = np.sqrt(M(x,*(m0,1))*T(x,*(P0,u)))
+    return np.nan_to_num(Tunneling.real)
+
+#Define the square of the integrand tunneling exponent (used for finding zeroes).
+def P2(x,*parameters):
+    P0,m0,u = parameters
+    Tunneling = M(x,*(m0,1))*T(x,*(P0,u))
+    return Tunneling.real
+
+#A function that returns the matrix element number, given a particular value for the position.
+def ii(x,*parameters):
+    #print('ii has accepted...')
+    #print('x=',x)
+    x0,dx = parameters
+    #print('x0-',x0)
+    #print('dx=',dx)
+    result = (x-x0)/dx
+    #print('result=',result)
+    #print('result-inted=',np.round(result,1))
+    result=np.round(result,1).astype(int)
+    return (result)
+
+#Define a function for the Tunneling Exponent as a function of the superfluid velocity u
+def Gamma(u):
+    nnu  =(ii(u,*(u_bound[0],deltau)))
+    result = gamma[nnu]
+    return result
+
+#Define a fit function for the Tunneling Exponent (Intrinsic Case)
+def Gamma_Fit(x,a,b,c,d):
+    result = (a/((x+b)**c))
+    return result
+
+#Define a fit function for the exit tunneling point
+def b_fit(X,a,b,c,d,e):
+    xi,u = X
+    result = (a/((u**b)*(xi**c)+d)+e)
+    return result
+
+#Define a function that takes the dimensionless vortex core radius and dimensionless superfluid velocity and gives the exit tunneling point
+def bdata(xi,u):
+    nnu  =(ii(u,*(u_bound[0],deltau)))
+    result = (b[nnu])
+    return result
+
+def bfunc(u):
+    nnu  =(ii(u,*(u_bound[0],deltau)))
+    result=b[nnu]
+    return result
+
+
+#====Code Parameters====#
+N=400
+uf = math.exp(-1)
+u_bound=(10**(-2),uf)
+Nx=200*N
+deltau=(u_bound[1]-u_bound[0])/N
+
+
+# In[15]:
+
+
+xSet=np.linspace(0,0,Nx,dtype=np.longdouble)
+uSet=np.linspace(0,0,N+1,dtype=np.longdouble)
+uSet[0]=u_bound[0]
+for i in range(0,N):
+    uSet[i+1]=uSet[i]+deltau
+a=np.zeros((N+1),dtype=np.longdouble)
+b=np.zeros((N+1),dtype=np.longdouble)
+gamma=np.zeros((N+1),dtype=np.longdouble)
+#print(gamma)
+#print(xiSet)
+#print(uSet)
+
+
+# In[16]:
+
+
+nu=0
+xMax=10e2
+xMin=100
+nu=0
+
+
+# In[17]:
+
+
+for u in uSet:
+    nMax=1
+    #print(nxi,nu)
+    data = (1,1,u)
+    dataT = (1,u)
+    #print(data)
+
+    Roots,info,ier,msg=opt.fsolve(T,[1.00000001,xMin],xtol=1e-20,args=dataT,maxfev=5000000*(N+1),full_output=True)
+    #print('ier= ',ier)
+    #print('msg=',msg)
+    #print('ai=',f"{Roots[0]:.16e}")
+    #print('bi=',f"{Roots[1]:.16e}")
+    a[nu]=Roots[0]
+    if ier!=1 or Roots[1]<Roots[0] or P2(Roots[1],*data)>1e-12:                #fsolve has discovered a complex root or a large b root
+        while Roots[1]<1 or nMax<50:                                           #Trying to Resolve large b root possibility
+            if Roots[1]<1:
+                print('Final Root below Vortex Core Radius, or Last Root Not good!')
+            #print(T(Roots[0],*dataT))
+            nMax=nMax+1
+            #print(nMax)
+            Roots=opt.fsolve(T,[1.000000000000001,xMax*nMax],xtol=1e-30,args=dataT,maxfev=5000000*(N+1))
+        nMax=1
+        #print('P(',Roots[1],') = ',P2(Roots[1],*data))
+    b[nu]=Roots[1]
+    if Roots[0]<1:                #fsolve has discovered a complex root or a large b root
+        while Roots[0]<1 or nMax<100:                                #Trying to Resolve large b root possibility
+            #print('Initial Root Found In Vortex Core')
+            #print(T(Roots[0],*dataT))
+            nMax=nMax+1
+            #print(nMax)
+            Roots=opt.fsolve(T,[1.00000000000000,1+xMax**(-nMax/5)],xtol=1e-30,args=dataT,maxfev=5000000*(N+1))
+        nMax=1
+        #print('P(',Roots[1],') = ',P2(Roots[1],*data))                    
+    if P2(Roots[1],*data)<-1e-10:                                      #Negative momentum detected
+        if P2((Roots[1]-Roots[0])/2,*data)<0:                         #Complex Root Detected
+            #print(P(Roots[1],*data))
+            #print('complex root detected')
+            Roots[0]=2
+            Roots[1]=2
+            a[nu]=Roots[0]
+            b[nu]=Roots[0]            
+    #print('af=',f"{Roots[0]:.16e}")
+    a[nu]=Roots[0]
+    
+    #print('a=',a[nu])
+    #print('b=',b[nu])
+    x=np.linspace(1,b[nu],Nx)
+    #print('x=',x)
+    data = (1,1,uSet[nu])
+    #print('data=',data)
+    VV=P(x,*data)
+    #print('VV=',VV)
+    zero=0*x
+    plt.plot(a[nu],0,'ro',color='c', label=r'$x_{a}$='+f'{a[nu]:.3e}')
+    plt.plot(b[nu],0,'ro',color='g', label=r'$x_{b}$ ='+f'{b[nu]:.3e}')
+    plt.plot(x,VV,label=r'$\overline{\mathcal{T}}$$\left(x\right)$',color='r')
+    plt.plot(x,zero,color='b',linestyle='--')
+    plt.axvline(x=1,color='b',linestyle='--')
+    plt.xlabel('Dimensionless Distance from Bump, x [units]')
+    plt.ylabel('Dimensionless Energy, '+r'$\overline{\mathcal{T}}$$\left(x\right)$ '+' [units]')
+    plt.suptitle('Vortex Energy (Intrinsic) vs Vortex Core Location')
+    #plt.title(f'(With r$\overline{\xi}_{0}$ = {xiSet[nxi]} and u = {uSet[nu]})')
+    plt.title(r'(With '+r'$u_{0}$ = '+f'{uSet[nu]:.3e})')
+    image_name = f'Figures\Intrinsic\T-u-{uSet[nu]}.svg'
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(image_name, format='svg',dpi=300)
+    plt.show()
+   
+    nu=nu+1
+    
+
+
+# In[18]:
+
+
+#print('a=',a)
+#print('b=',b)
+
+
+# In[19]:
+
+
+## Now I am gonna generate the gamma results with the upper and lower bounds
+for u in uSet:
+    nu=round(ii(u,*(u_bound[0],deltau)))
+    #print('In the (nu) = ',((nu)),' iteration')
+    data = (1,1,u)
+    #print('Integrating from a = ',a[nu],' to b =',b[nu])
+    integration_result = integrate.quad(P,a[nu],b[nu],args=data)
+    gamma[nu]= integration_result[0]
+    #print('The Integration Result is = ',gamma[nu])
+
+
+# In[20]:
+
+
+#print('gamma=',gamma)
+
+
+# In[164]:
+
+
+## Now I am gonna generate the plots for the Tunneling Exponent and the dimensionless exponent. First I need these variables
+xi0=1.7e-10
+rho=7.4e-8
+rho=5.83e-8
+hbar=1.05457e-34
+m=6.644e-27
+h=6.62607015e-34
+kappa=h/m
+c=240
+gamma0=(math.sqrt(2)*xi0*rho*kappa**2)/(2*math.pi*c*hbar)
+Omega0=1.5e+11
+Lambda=np.zeros((N+1),dtype=np.longdouble)
+LambdaWKB1=np.zeros((N+1),dtype=np.longdouble)
+LambdaWKB3=np.zeros((N+1),dtype=np.longdouble)
+LambdaWKB10=np.zeros((N+1),dtype=np.longdouble)
+LambdaWKB50=np.zeros((N+1),dtype=np.longdouble)
+
+
+# In[165]:
+
+
+print(gamma0)
+
+
+# In[200]:
+
+
+#print('a=',a[nu])
+#print('b=',b[nu])
+x=np.linspace(u_bound[0],u_bound[1],N+1)
+#print('x=',x)
+#data = (1,1,uSet[nu])
+#print('data=',data)
+VV=gamma0*gamma
+#print('VV=',VV)
+zero=0*x
+#plt.plot(a[nu],0,'ro',color='c', label=r'$x_{a}$='+f'{a[nu]:.3e}')
+#plt.plot(b[nu],0,'ro',color='g', label=r'$x_{b}$ ='+f'{b[nu]:.3e}')
+#plt.xlim(0.15,0.34)
+plt.ylim(-0.1,1200)
+plt.plot(x,VV,label="One Atomic Layer",color='r')
+plt.plot(x,3*VV,label="Three Atomic Layers",color='g')
+plt.plot(x,10*VV,label="Ten Atomic Layers",color='b')
+plt.plot(x,50*VV,label="Fifty Atomic Layers",color='c')
+plt.plot(x,zero,color='black',linestyle='--')
+plt.axvline(x=0.0,color='black',linestyle='--')
+plt.xlabel('Dimensionless Superfluid Speed, '+r'$u_0$ ')
+plt.ylabel('Dimensionless Tunneling Exponent, '+r'$\gamma$ ')
+plt.suptitle('Dimensionless Tunneling Exponent - Intrinsic Nucleation')
+#plt.title(f'(With r$\overline{\xi}_{0}$ = {xiSet[nxi]} and u = {uSet[nu]})')
+#plt.title(r'(With $\overline{\xi}_{0}$ = '+r'$u_{0}$ = '+f'{uSet[nu]:.3e})')
+# This gets the directory of the current notebook
+notebook_dir = os.getcwd()
+# Define the desired subfolder path
+subfolder_path = os.path.join(notebook_dir, "Figures", "Intrinsic")
+# Define the full path for the SVG file
+image_name = "TunnelingExponent-Intrinsic-2025-07-08.svg"
+full_path = os.path.join(subfolder_path, image_name)
+plt.legend()
+plt.savefig(full_path, format="svg", dpi=1200)
+plt.show()
+
+
+# In[201]:
+
+
+#print('a=',a[nu])
+#print('b=',b[nu])
+x=np.linspace(u_bound[0],u_bound[1],N+1)
+#print('x=',x)
+#data = (1,1,uSet[nu])
+#print('data=',data)
+VV=gamma0*gamma
+#print('VV=',VV)
+zero=0*x
+#plt.plot(a[nu],0,'ro',color='c', label=r'$x_{a}$='+f'{a[nu]:.3e}')
+#plt.plot(b[nu],0,'ro',color='g', label=r'$x_{b}$ ='+f'{b[nu]:.3e}')
+plt.xlim(0.1,0.32)
+plt.ylim(-0.1,100)
+plt.plot(x,VV,label="One Atomic Layer",color='r')
+plt.plot(x,3*VV,label="Three Atomic Layers",color='g')
+plt.plot(x,10*VV,label="Ten Atomic Layers",color='b')
+plt.plot(x,50*VV,label="Fifty Atomic Layers",color='c')
+#plt.plot(x,zero,color='black',linestyle='--')
+#plt.axvline(x=0.01,color='black',linestyle='--')
+plt.xlabel('Dimensionless Superfluid Speed, '+r'$u_0$ ')
+plt.ylabel('Dimensionless Tunneling Exponent, '+r'$\gamma$ ')
+plt.suptitle('Dimensionless Tunneling Exponent - Intrinsic Nucleation - Zoomed In')
+#plt.title(f'(With r$\overline{\xi}_{0}$ = {xiSet[nxi]} and u = {uSet[nu]})')
+#plt.title(r'(With $\overline{\xi}_{0}$ = '+r'$u_{0}$ = '+f'{uSet[nu]:.3e})')
+# This gets the directory of the current notebook
+notebook_dir = os.getcwd()
+# Define the desired subfolder path
+subfolder_path = os.path.join(notebook_dir, "Figures", "Intrinsic")
+# Define the full path for the SVG file
+image_name = "TunnelingExponent-Intrinsic-zoomed-2025-07-08.svg"
+full_path = os.path.join(subfolder_path, image_name)
+plt.legend()
+plt.savefig(full_path, format="svg", dpi=1200)
+plt.show()
+
+
+# In[ ]:
+
+
+
+
+
+# In[202]:
+
+
+for u in uSet:
+    nu=round(ii(u,*(u_bound[0],deltau)))
+    LambdaWKB1[nu]=Omega0*math.exp(-gamma0*gamma[nu])
+    LambdaWKB3[nu]=Omega0*math.exp(-3*gamma0*gamma[nu])
+    LambdaWKB10[nu]=Omega0*math.exp(-10*gamma0*gamma[nu])
+    LambdaWKB50[nu]=Omega0*math.exp(-50*gamma0*gamma[nu])
+
+
+# In[203]:
+
+
+#print('a=',a[nu])
+#print('b=',b[nu])
+x=np.linspace(u_bound[0],u_bound[1],N+1)
+#print('x=',x)
+#data = (1,1,uSet[nu])
+#print('data=',data)
+#VV=LambdaWKB
+#print('VV=',VV)
+zero=0*x
+#plt.plot(a[nu],0,'ro',color='c', label=r'$x_{a}$='+f'{a[nu]:.3e}')
+#plt.plot(b[nu],0,'ro',color='g', label=r'$x_{b}$ ='+f'{b[nu]:.3e}')
+#plt.xlim(0.05,0.15)
+plt.ylim(-0.1,100)
+plt.plot(x,LambdaWKB1,label="One Atomic Layer",color='r')
+plt.plot(x,LambdaWKB3,label="Three Atomic Layers",color='g')
+plt.plot(x,LambdaWKB10,label="Ten Atomic Layers",color='b')
+plt.plot(x,LambdaWKB50,label="Fifty Atomic Layers",color='c')
+#plt.plot(x,zero,color='b',linestyle='--')
+#plt.axvline(x=0.0,color='black',linestyle='--')
+plt.xlabel('Dimensionless Superfluid Speed, '+r'$u_0$ ')
+plt.ylabel('Tunneling Rate, '+r'$\Gamma_{\text{WKB}}$ '+'[Hz]')
+plt.suptitle('Tunneling Rate - Intrinsic Nucleation')
+#plt.title(f'(With r$\overline{\xi}_{0}$ = {xiSet[nxi]} and u = {uSet[nu]})')
+#plt.title(r'(With $\overline{\xi}_{0}$ = '+r'$u_{0}$ = '+f'{uSet[nu]:.3e})')
+# This gets the directory of the current notebook
+notebook_dir = os.getcwd()
+# Define the desired subfolder path
+subfolder_path = os.path.join(notebook_dir, "Figures", "Intrinsic")
+# Define the full path for the SVG file
+image_name = "Tunneling_Rate-Intrinsic-plot1-2025-07-08.svg"
+full_path = os.path.join(subfolder_path, image_name)
+plt.legend()
+plt.savefig(full_path, format="svg", dpi=1200)
+plt.show()
+
+
+# In[199]:
+
+
+#print('a=',a[nu])
+#print('b=',b[nu])
+x=np.linspace(u_bound[0],u_bound[1],N+1)
+#print('x=',x)
+#data = (1,1,uSet[nu])
+#print('data=',data)
+#VV=LambdaWKB
+#print('VV=',VV)
+zero=0*x
+#plt.plot(a[nu],0,'ro',color='c', label=r'$x_{a}$='+f'{a[nu]:.3e}')
+#plt.plot(b[nu],0,'ro',color='g', label=r'$x_{b}$ ='+f'{b[nu]:.3e}')
+#plt.xlim(0.05,0.15)
+plt.ylim(0,1e-3)
+plt.plot(x,LambdaWKB1,label="One Atomic Layer",color='r')
+plt.plot(x,LambdaWKB3,label="Three Atomic Layers",color='g')
+plt.plot(x,LambdaWKB10,label="Ten Atomic Layers",color='b')
+plt.plot(x,LambdaWKB50,label="Fifty Atomic Layers",color='c')
+#plt.plot(x,zero,color='black',linestyle='--')
+#plt.axvline(x=0.0,color='black',linestyle='--')
+plt.xlabel('Dimensionless Superfluid Speed, '+r'$u_0$ ')
+plt.ylabel('Tunneling Rate, '+r'$\Gamma_{\text{WKB}}$ '+'[Hz]')
+plt.suptitle('Tunneling Rate - Intrinsic Nucleation')
+#plt.title(f'(With r$\overline{\xi}_{0}$ = {xiSet[nxi]} and u = {uSet[nu]})')
+#plt.title(r'(With $\overline{\xi}_{0}$ = '+r'$u_{0}$ = '+f'{uSet[nu]:.3e})')
+# This gets the directory of the current notebook
+notebook_dir = os.getcwd()
+# Define the desired subfolder path
+subfolder_path = os.path.join(notebook_dir, "Figures", "Intrinsic")
+# Define the full path for the SVG file
+image_name = "Tunneling_Rate-Intrinsic-plot2-2025-07-08.svg"
+full_path = os.path.join(subfolder_path, image_name)
+plt.legend()
+plt.savefig(full_path, format="svg", dpi=1200)
+plt.show()
+
+
+# In[198]:
+
+
+#print('a=',a[nu])
+#print('b=',b[nu])
+x=np.linspace(u_bound[0],u_bound[1],N+1)
+#print('x=',x)
+#data = (1,1,uSet[nu])
+#print('data=',data)
+#VV=LambdaWKB
+#print('VV=',VV)
+zero=0*x
+#plt.plot(a[nu],0,'ro',color='c', label=r'$x_{a}$='+f'{a[nu]:.3e}')
+#plt.plot(b[nu],0,'ro',color='g', label=r'$x_{b}$ ='+f'{b[nu]:.3e}')
+#plt.xlim(0.05,0.15)
+plt.ylim(-3,8)
+plt.plot(x,np.log10(LambdaWKB1),label="One Atomic Layer",color='r')
+plt.plot(x,np.log10(LambdaWKB3),label="Three Atomic Layers",color='g')
+plt.plot(x,np.log10(LambdaWKB10),label="Ten Atomic Layers",color='b')
+plt.plot(x,np.log10(LambdaWKB50),label="Fifty Atomic Layers",color='c')
+plt.plot(x,zero,color='black',linestyle='--')
+plt.axvline(x=0.01,color='black',linestyle='--')
+plt.xlabel('Dimensionless Superfluid Speed, '+r'$u_0$ ')
+plt.ylabel('Tunneling Rate, '+r'$\log_{\text{10}}\left(\frac{\Gamma_{\text{WKB}}}{\text{hz}}\right)$ ')
+plt.suptitle('Tunneling Rate - Intrinsic Nucleation - Log Scale')
+#plt.title(f'(With r$\overline{\xi}_{0}$ = {xiSet[nxi]} and u = {uSet[nu]})')
+#plt.title(r'(With $\overline{\xi}_{0}$ = '+r'$u_{0}$ = '+f'{uSet[nu]:.3e})')
+# This gets the directory of the current notebook
+notebook_dir = os.getcwd()
+# Define the desired subfolder path
+subfolder_path = os.path.join(notebook_dir, "Figures", "Intrinsic")
+# Define the full path for the SVG file
+image_name = "Tunneling_Rate-Intrinsic-logscale-2025-07-08.svg"
+full_path = os.path.join(subfolder_path, image_name)
+plt.legend()
+plt.savefig(full_path, format="svg", dpi=1200)
+plt.show()
+
+
+# In[22]:
+
+
+U = np.meshgrid(uSet)
+print(U)
+U=uSet
+Z=Gamma(U)
+
+
+# In[23]:
+
+
+xdata = np.vstack((U.ravel()))
+
+
+# In[24]:
+
+
+#popt,pcov = curve_fit(b_fit,xdata,Z.ravel(),(1,1,1,0,0))
+
+
+# In[25]:
+
+
+#print(popt)
+
+
+# In[ ]:
+
+
+
+
+
+# In[26]:
+
+
+#print(xiSet[0])
+#print(ii(xiSet[4],*(xi_bound[0],deltaxi)))
+#print(xiSet)
+#print(ii(xiSet,xi_bound[0],deltaxi))
+#print(gamma[3,0])
+#print(Gamma(xiSet[4],uSet[3]))
+#print(a)
+#print(b)
+
+
+# In[27]:
+
+
+#print(b)
+
+
+# In[28]:
+
+
+#print(xiSet)
+#print(uSet)
+
+
+# In[ ]:
+
+
+
+
+
+# In[ ]:
+
+
+
+
+
+# In[29]:
+
+
+#print(gamma)
+
+
+# In[ ]:
+
+
+
+
+
+# In[30]:
+
+
+#print(XI)
+#print(Z)
+
+
+# In[ ]:
+
+
+
+
+
+# In[31]:
+
+
+#b[100,15]
+
+
+# In[32]:
+
+
+xdata = np.vstack(U.ravel())
+
+
+# In[33]:
+
+
+#print('Z=',Z)
+#print('xdata=',xdata)
+#print('U=',U)
+
+
+# In[34]:
+
+
+popt,pcov = curve_fit(Gamma_Fit,U,Z,(1,0,1,-10))
+
+
+# In[35]:
+
+
+print(popt)
+print(pcov)
+
+
+# In[36]:
+
+
+#print(a)
+#print(b)
+
+
+# In[37]:
+
+
+surf=ax.plot_surface(
+
+
+# In[ ]:
+
+
+nxi=0
+nu=0
+
+
+# In[ ]:
+
+
+
+
+
+# In[ ]:
+
+
+nxi=0
+nu=0
+
+
+# In[ ]:
+
+
+x=np.linspace(1,1e12,200*N)
+data = (1,1,1,xiSet[nxi],uSet[nu])
+VV=P(x,*data)
+zero=0*x
+print(Roots)
+print(VV[0])
+print(VV[1])
+plt.plot(a[nxi,nu],0,'ro',color='c', label=f'a =({a[nxi,nu]},0)')
+plt.plot(b[nxi,nu],0,'ro',color='g', label=f'b =({b[nxi,nu]},0)')
+plt.plot(x,VV,label='Momentum',color='r')
+plt.plot(x,zero,color='b',linestyle='--')
+plt.axvline(x=1,color='b',linestyle='--')
+plt.xlabel('Normalized Distance from Bump')
+plt.ylabel('Momentum')
+plt.title('Vortex Tunneling Momentum vs Vortex Core Location')
+plt.legend()
+plt.show()
+print(b[2,3])
+
+
+# In[ ]:
+
+
+
+
+
+# In[ ]:
+
+
+
+
